@@ -351,7 +351,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self._send_json(HTTPStatus.OK, {"ok": True})
             return
-        if path == "/v1/models":
+        if path in ("/v1/models", "/models"):
             self._send_json(HTTPStatus.OK, model_list_payload())
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
@@ -359,7 +359,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self._debug_request()
         path = urlparse(self.path).path
-        if path != "/v1/chat/completions":
+        if path not in ("/v1/chat/completions", "/chat/completions"):
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
 
