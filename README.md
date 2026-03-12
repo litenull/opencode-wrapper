@@ -34,18 +34,29 @@ npm install
 npm start
 ```
 
-Development mode with auto-reload:
+Development mode with ts-node:
 
 ```bash
 npm run dev
 ```
 
-Custom port:
+## CLI options
+
+```bash
+npm start -- --help
+
+Options:
+  -p, --port <number>   port to listen on
+  -h, --host <string>   host to bind to
+  --debug               enable debug logging
+```
+
+Examples:
 
 ```bash
 npm start -- -p 8001
-# or
-PORT=8001 npm start
+npm start -- --host 0.0.0.0 --port 3000
+npm start -- --debug
 ```
 
 ## Environment variables

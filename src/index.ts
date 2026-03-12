@@ -10,6 +10,6 @@ export {
   buildMessagesPrompt,
 } from "./text-utils";
 export { sseEvent, sseDone, createChatCompletionChunk, createChatCompletionResponse, createModelListResponse } from "./sse";
-export { handleGet, handlePost, createHandler } from "./handler";
+export { healthHandler, modelsHandler, chatCompletionsHandler, requestLogger, debugLog } from "./handler";
 export { spawn, SpawnResult } from "./spawn";
 export * from "./types";

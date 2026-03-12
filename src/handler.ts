@@ -1,6 +1,5 @@
-import * as http from "http";
 import * as crypto from "crypto";
-import { URL } from "url";
+import { Request, Response, NextFunction, RequestHandler } from "express";
 import { Config, CFG } from "./config";
 import { ensureTmuxSession, capturePane, sendPrompt, createTmuxLock } from "./tmux";
 import {
@@ -15,43 +14,10 @@ import { ChatCompletionRequest } from "./types";
 
 const tmuxLock = createTmuxLock();
 
-function debugLog(message: string): void {
+export function debugLog(message: string): void {
   if (!CFG.debug) return;
   const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
   console.log(`[debug ${ts}] ${message}`);
-}
-
-function jsonResponse(res: http.ServerResponse, status: number, payload: unknown): void {
-  const body = Buffer.from(JSON.stringify(payload), "utf-8");
-  res.writeHead(status, {
-    "Content-Type": "application/json",
-    "Content-Length": body.length,
-    Connection: "close",
-  });
-  res.end(body);
-}
-
-function readJsonBody<T>(req: http.IncomingMessage, maxLog: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => {
-      const raw = Buffer.concat(chunks);
-      if (CFG.debug) {
-        let rawText = raw.toString("utf-8");
-        if (rawText.length > maxLog) {
-          rawText = rawText.slice(0, maxLog) + "...<truncated>";
-        }
-        debugLog(`request raw body: ${rawText}`);
-      }
-      try {
-        resolve(JSON.parse(raw.toString("utf-8")));
-      } catch (e) {
-        reject(new Error("invalid JSON body"));
-      }
-    });
-    req.on("error", reject);
-  });
 }
 
 function generateCompletionId(): string {
@@ -60,23 +26,6 @@ function generateCompletionId(): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export async function handleGet(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-  const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
-  const path = url.pathname;
-
-  if (path === "/health") {
-    jsonResponse(res, 200, { ok: true });
-    return;
-  }
-
-  if (path === "/v1/models" || path === "/models") {
-    jsonResponse(res, 200, createModelListResponse());
-    return;
-  }
-
-  jsonResponse(res, 404, { error: "not found" });
 }
 
 async function collectResponseText(cfg: Config, baseline: string): Promise<string> {
@@ -133,7 +82,7 @@ async function handleStreamingChat(
   model: string,
   baseline: string,
   prompt: string,
-  res: http.ServerResponse
+  res: Response
 ): Promise<string> {
   const emittedParts: string[] = [];
   let baselineReply = extractLatestAssistantText(baseline);
@@ -178,11 +127,10 @@ async function handleStreamingChat(
     }
   }
 
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "close",
-  });
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "close");
+  res.flushHeaders();
 
   const write = (data: Buffer): boolean => {
     try {
@@ -250,17 +198,17 @@ async function handleStreamingChat(
   return emittedParts.join("").trim();
 }
 
-export async function handlePost(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-  const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
-  const path = url.pathname;
+export const healthHandler: RequestHandler = (req, res) => {
+  res.json({ ok: true });
+};
 
-  if (path !== "/v1/chat/completions" && path !== "/chat/completions") {
-    jsonResponse(res, 404, { error: "not found" });
-    return;
-  }
+export const modelsHandler: RequestHandler = (req, res) => {
+  res.json(createModelListResponse());
+};
 
+export const chatCompletionsHandler: RequestHandler = async (req, res, next) => {
   try {
-    const body = await readJsonBody<ChatCompletionRequest>(req, CFG.debugLogBodyMax);
+    const body = req.body as ChatCompletionRequest;
     const model = body.model ?? "claude-tmux";
     const stream = Boolean(body.stream ?? false);
     const messages = body.messages;
@@ -270,13 +218,13 @@ export async function handlePost(req: http.IncomingMessage, res: http.ServerResp
     );
 
     if (!Array.isArray(messages)) {
-      jsonResponse(res, 400, { error: "messages must be a list" });
+      res.status(400).json({ error: "messages must be a list" });
       return;
     }
 
     const prompt = buildMessagesPrompt(messages, CFG.promptMode);
     if (!prompt) {
-      jsonResponse(res, 400, { error: "empty prompt" });
+      res.status(400).json({ error: "empty prompt" });
       return;
     }
     debugLog(`built prompt chars=${prompt.length}`);
@@ -299,21 +247,25 @@ export async function handlePost(req: http.IncomingMessage, res: http.ServerResp
       const text = await collectResponseText(CFG, baseline);
       debugLog(`non-stream response chars=${text.length}`);
 
-      jsonResponse(res, 200, createChatCompletionResponse({ id: completionId, created, model, content: text }));
+      res.json(createChatCompletionResponse({ id: completionId, created, model, content: text }));
     } finally {
       release();
     }
   } catch (err) {
     if (err instanceof Error && err.message.includes("timeout")) {
-      jsonResponse(res, 504, { error: err.message });
+      res.status(504).json({ error: err.message });
     } else {
-      jsonResponse(res, 500, { error: String(err) });
+      res.status(500).json({ error: String(err) });
     }
   }
-}
+};
 
-export function createHandler(cfg: Config): (req: http.IncomingMessage, res: http.ServerResponse) => void {
-  return (req, res) => {
+export function requestLogger(cfg: Config): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!cfg.debug) {
+      next();
+      return;
+    }
     const redactedHeaders: Record<string, string> = {};
     for (const [key, value] of Object.entries(req.headers)) {
       if (key.toLowerCase() === "authorization") {
@@ -322,18 +274,7 @@ export function createHandler(cfg: Config): (req: http.IncomingMessage, res: htt
         redactedHeaders[key] = Array.isArray(value) ? value.join(", ") : (value ?? "");
       }
     }
-    if (cfg.debug) {
-      debugLog(`request ${req.method} ${req.url} headers=${JSON.stringify(redactedHeaders)}`);
-    }
-
-    if (req.method === "GET") {
-      handleGet(req, res).catch((err) => {
-        jsonResponse(res, 500, { error: String(err) });
-      });
-    } else if (req.method === "POST") {
-      handlePost(req, res);
-    } else {
-      jsonResponse(res, 405, { error: "method not allowed" });
-    }
+    debugLog(`request ${req.method} ${req.url} headers=${JSON.stringify(redactedHeaders)}`);
+    next();
   };
 }
