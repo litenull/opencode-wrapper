@@ -18,17 +18,37 @@ This wrapper exposes a minimal OpenAI-compatible endpoint and uses a hidden `tmu
 
 ## Requirements
 
-- `python3`
+- Node.js >= 18
 - `tmux`
 - `claude` command available in `PATH`
+
+## Install
+
+```bash
+npm install
+```
 
 ## Run
 
 ```bash
-python3 server.py
+npm start
 ```
 
-Optional env vars:
+Development mode with auto-reload:
+
+```bash
+npm run dev
+```
+
+Custom port:
+
+```bash
+npm start -- -p 8001
+# or
+PORT=8001 npm start
+```
+
+## Environment variables
 
 - `HOST` (default `127.0.0.1`)
 - `PORT` (default `8000`)
@@ -80,4 +100,25 @@ If your client requires auth, inject a fake bearer token; this server does not v
 
 ```bash
 curl http://127.0.0.1:8000/v1/models
+```
+
+## Attaching to tmux session
+
+```bash
+tmux attach -t claude-bridge
+```
+
+## Project structure
+
+```
+src/
+├── types.ts      # TypeScript interfaces
+├── config.ts     # Configuration class
+├── spawn.ts      # Child process spawning utility
+├── tmux.ts       # Tmux operations (session, capture, send)
+├── text-utils.ts # Text processing (sanitize, delta, extract)
+├── sse.ts        # SSE event builders
+├── handler.ts    # HTTP request handlers
+├── server.ts     # Main entry point
+└── index.ts      # Public exports
 ```
