@@ -260,21 +260,24 @@ export const chatCompletionsHandler: RequestHandler = async (req, res, next) => 
   }
 };
 
+const SENSITIVE_HEADERS = new Set(["authorization", "cookie", "set-cookie"]);
+
+function redactHeader(key: string, value: string | string[] | undefined): string {
+  if (SENSITIVE_HEADERS.has(key.toLowerCase())) return "<redacted>";
+  if (Array.isArray(value)) return value.join(", ");
+  return value ?? "";
+}
+
 export function requestLogger(cfg: Config): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!cfg.debug) {
       next();
       return;
     }
-    const redactedHeaders: Record<string, string> = {};
-    for (const [key, value] of Object.entries(req.headers)) {
-      if (key.toLowerCase() === "authorization") {
-        redactedHeaders[key] = "<redacted>";
-      } else {
-        redactedHeaders[key] = Array.isArray(value) ? value.join(", ") : (value ?? "");
-      }
-    }
-    debugLog(`request ${req.method} ${req.url} headers=${JSON.stringify(redactedHeaders)}`);
+    const headers = Object.fromEntries(
+      Object.entries(req.headers).map(([k, v]) => [k, redactHeader(k, v)])
+    );
+    debugLog(`request ${req.method} ${req.url} headers=${JSON.stringify(headers)}`);
     next();
   };
 }
